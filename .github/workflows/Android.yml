@@ -1,11 +1,9 @@
 
-name: Build Android APK
+name: Build App Lock APK
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +11,6 @@ permissions:
 
 jobs:
   build:
-    name: Build App Lock APK
     runs-on: ubuntu-latest
 
     steps:
@@ -26,24 +23,43 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Locate Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          test -d "${ANDROID_HOME}" || {
+            echo "Android SDK directory not found"
+            exit 1
+          }
+
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" \
+              -type f -name sdkmanager 2>/dev/null | head -n 1)"
+          fi
+
+          test -x "$SDKMANAGER" || {
+            echo "sdkmanager not found"
+            exit 1
+          }
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager "platform-tools" \
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" \
+            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
-          yes | sdkmanager --licenses
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Check Android project files
+      - name: Check project files
         run: |
-          echo "Checking project files..."
           ls -la
           test -f settings.gradle.kts -o -f settings.gradle
           test -f app/build.gradle.kts -o -f app/build.gradle
