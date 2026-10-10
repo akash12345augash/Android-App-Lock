@@ -13,25 +13,36 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 11076708
-
-      - name: Install Android SDK packages
+      - name: Locate Android SDK
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager 2>/dev/null | head -n 1)
+          test -n "$SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$(dirname "$SDKMANAGER")/../platform-tools" >> "$GITHUB_PATH"
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+      - name: Install SDK packages
+        run: |
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -52,46 +63,46 @@ jobs:
           import xml.etree.ElementTree as ET
 
           base = pathlib.Path("project")
-          files = list(base.rglob("accessibility_service_config.xml"))
-          if not files:
-              raise SystemExit("Accessibility XML file not found")
-
-          config = files[0]
-          android = "{http://schemas.android.com/apk/res/android}"
-          tree = ET.parse(config)
-          root = tree.getroot()
-          root.set(android + "description",
-                   "@string/accessibility_service_description")
-          tree.write(config, encoding="utf-8", xml_declaration=True)
-
-          values = config.parents[1] / "values"
-          values.mkdir(parents=True, exist_ok=True)
-          strings = values / "strings.xml"
-
-          if strings.exists():
-              st = ET.parse(strings)
-              sr = st.getroot()
-          else:
-              sr = ET.Element("resources")
-              st = ET.ElementTree(sr)
-
-          item = sr.find(
-              "string[@name='accessibility_service_description']"
-          )
-          if item is None:
-              item = ET.SubElement(
-                  sr, "string",
-                  {"name": "accessibility_service_description"}
+          configs = list(base.rglob("accessibility_service_config.xml"))
+          if configs:
+              config = configs[0]
+              android = "{http://schemas.android.com/apk/res/android}"
+              tree = ET.parse(config)
+              tree.getroot().set(
+                  android + "description",
+                  "@string/accessibility_service_description"
               )
+              tree.write(config, encoding="utf-8",
+                         xml_declaration=True)
 
-          item.text = (
-              "Detects when a selected app is opened so App Lock "
-              "can show its lock screen."
-          )
-          st.write(strings, encoding="utf-8", xml_declaration=True)
+              values = config.parents[1] / "values"
+              values.mkdir(parents=True, exist_ok=True)
+              strings = values / "strings.xml"
+
+              if strings.exists():
+                  st = ET.parse(strings)
+                  root = st.getroot()
+              else:
+                  root = ET.Element("resources")
+                  st = ET.ElementTree(root)
+
+              item = root.find(
+                  "string[@name='accessibility_service_description']"
+              )
+              if item is None:
+                  item = ET.SubElement(
+                      root, "string",
+                      {"name": "accessibility_service_description"}
+                  )
+              item.text = (
+                  "Detects when a selected app is opened so App Lock "
+                  "can show its lock screen."
+              )
+              st.write(strings, encoding="utf-8",
+                       xml_declaration=True)
           PY
 
-      - name: Build debug APK
+      - name: Build APK
         run: gradle -p project assembleDebug --stacktrace
 
       - name: Upload APK
@@ -100,4 +111,3 @@ jobs:
           name: app-debug-apk
           path: project/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 7
