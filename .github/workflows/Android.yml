@@ -2,9 +2,9 @@
 name: Build App Lock APK
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, master]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,47 +14,78 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: ''
+      - uses: android-actions/setup-android@v3
 
-      - name: Install SDK packages
+      - name: Install Android SDK
         run: |
-          sdkmanager "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
           yes | sdkmanager --licenses || true
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Extract Android project
+      - name: Extract project
         run: |
           mkdir -p project
           unzip -o Android-App-Lock-Complete-Project.zip -d project
-          ls -la project
-          test -f project/settings.gradle.kts
-          test -f project/app/build.gradle.kts
 
-      - name: Build debug APK
+      - name: Fix XML automatically
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          roots = [pathlib.Path("project")]
+          configs = list(roots[0].rglob("accessibility_service_config.xml"))
+          if not configs:
+              raise SystemExit("Accessibility XML file not found")
+
+          config = configs[0]
+          android = "{http://schemas.android.com/apk/res/android}"
+          tree = ET.parse(config)
+          root = tree.getroot()
+          root.set(android + "description",
+                   "@string/accessibility_service_description")
+          tree.write(config, encoding="utf-8", xml_declaration=True)
+
+          values = config.parents[1] / "values"
+          values.mkdir(parents=True, exist_ok=True)
+          strings = values / "strings.xml"
+
+          if strings.exists():
+              st = ET.parse(strings)
+              sr = st.getroot()
+          else:
+              sr = ET.Element("resources")
+              st = ET.ElementTree(sr)
+
+          item = sr.find("string[@name='accessibility_service_description']")
+          if item is None:
+              item = ET.SubElement(
+                  sr, "string",
+                  {"name": "accessibility_service_description"}
+              )
+          item.text = (
+              "Detects when a selected app is opened so App Lock "
+              "can show its lock screen."
+          )
+          st.write(strings, encoding="utf-8", xml_declaration=True)
+          print("Accessibility description fixed")
+          PY
+
+      - name: Build APK
         run: gradle -p project assembleDebug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: project/app/build/outputs/apk/debug/*.apk
+          path: project/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 7
