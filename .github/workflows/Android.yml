@@ -25,19 +25,19 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
-      - name: Make Gradle executable
+      - name: Check Gradle wrapper
         run: |
-          if [ -f gradlew ]; then chmod +x gradlew; fi
+          test -f gradlew || {
+            echo "ERROR: gradlew is missing"
+            exit 1
+          }
+          chmod +x gradlew
 
       - name: Build debug APK
-        run: |
-          if [ -f gradlew ]; then
-            ./gradlew assembleDebug
-          else
-            echo "ERROR: gradlew is missing from the repository."
-            exit 1
-          fi
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
